@@ -346,17 +346,11 @@ def from_rotation_matrix(rotation_matrix, name=None):
       qz = 0.25 * sq
       return tf.stack((qx, qy, qz, qw), axis=-1)
 
-    def cond_idx(cond):
-      cond = tf.expand_dims(cond, -1)
-      cond = tf.tile(cond, [1] * (rotation_matrix.shape.ndims - 2) + [4])
-      return cond
-
-    where_2 = tf.compat.v1.where(
-        cond_idx(entries[1][1] > entries[2][2]), cond_2(), cond_3())
-    where_1 = tf.compat.v1.where(
-        cond_idx((entries[0][0] > entries[1][1])
-                 & (entries[0][0] > entries[2][2])), cond_1(), where_2)
-    quat = tf.compat.v1.where(cond_idx(trace > 0), tr_positive(), where_1)
+    where_2 = tf.cond(entries[1][1] > entries[2][2], cond_2, cond_3)
+    where_1 = tf.cond(
+        (entries[0][0] > entries[1][1]) & (entries[0][0] > entries[2][2]),
+        cond_1, lambda: where_2)
+    quat = tf.cond(trace > 0, tr_positive, lambda: where_1)
     return quat
 
 
