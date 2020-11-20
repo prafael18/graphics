@@ -26,18 +26,12 @@ $$x^2 + y^2 + z^2 + w^2 = 1$$.
 
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import tensorflow as tf
-
 from tensorflow_graphics.geometry.transformation import rotation_matrix_3d
 from tensorflow_graphics.math import vector
-from tensorflow_graphics.util import asserts
-from tensorflow_graphics.util import export_api
-from tensorflow_graphics.util import safe_ops
-from tensorflow_graphics.util import shape
+from tensorflow_graphics.util import asserts, export_api, safe_ops, shape
 
 
 def _build_quaternion_from_sines_and_cosines(sin_half_angles, cos_half_angles):
@@ -305,53 +299,54 @@ def from_rotation_matrix(rotation_matrix, name=None):
         has_dim_equals=((-1, 3), (-2, 3)))
     rotation_matrix = rotation_matrix_3d.assert_rotation_matrix_normalized(
         rotation_matrix)
-
-    trace = tf.linalg.trace(rotation_matrix)
     eps_addition = asserts.select_eps_for_addition(rotation_matrix.dtype)
-    rows = tf.unstack(rotation_matrix, axis=-2)
-    entries = [tf.unstack(row, axis=-1) for row in rows]
 
-    def tr_positive():
+    def tr_positive(matrix, trace):
       sq = tf.sqrt(trace + 1.0) * 2.  # sq = 4 * qw.
       qw = 0.25 * sq
-      qx = safe_ops.safe_unsigned_div(entries[2][1] - entries[1][2], sq)
-      qy = safe_ops.safe_unsigned_div(entries[0][2] - entries[2][0], sq)
-      qz = safe_ops.safe_unsigned_div(entries[1][0] - entries[0][1], sq)
-      return tf.stack((qx, qy, qz, qw), axis=-1)
+      qx = safe_ops.safe_unsigned_div(matrix[2, 1] - matrix[1, 2], sq)
+      qy = safe_ops.safe_unsigned_div(matrix[0, 2] - matrix[2, 0], sq)
+      qz = safe_ops.safe_unsigned_div(matrix[1, 0] - matrix[0, 1], sq)
+      return tf.convert_to_tensor([qx, qy, qz, qw], dtype=tf.float32)
 
-    def cond_1():
-      sq = tf.sqrt(1.0 + entries[0][0] - entries[1][1] - entries[2][2] +
+    def cond_1(matrix):
+      sq = tf.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2] +
                    eps_addition) * 2.  # sq = 4 * qx.
-      qw = safe_ops.safe_unsigned_div(entries[2][1] - entries[1][2], sq)
+      qw = safe_ops.safe_unsigned_div(matrix[2, 1] - matrix[1, 2], sq)
       qx = 0.25 * sq
-      qy = safe_ops.safe_unsigned_div(entries[0][1] + entries[1][0], sq)
-      qz = safe_ops.safe_unsigned_div(entries[0][2] + entries[2][0], sq)
-      return tf.stack((qx, qy, qz, qw), axis=-1)
+      qy = safe_ops.safe_unsigned_div(matrix[0, 1] + matrix[1, 0], sq)
+      qz = safe_ops.safe_unsigned_div(matrix[0, 2] + matrix[2, 0], sq)
+      return tf.convert_to_tensor([qx, qy, qz, qw], dtype=tf.float32)
 
-    def cond_2():
-      sq = tf.sqrt(1.0 + entries[1][1] - entries[0][0] - entries[2][2] +
+    def cond_2(matrix):
+      sq = tf.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2] +
                    eps_addition) * 2.  # sq = 4 * qy.
-      qw = safe_ops.safe_unsigned_div(entries[0][2] - entries[2][0], sq)
-      qx = safe_ops.safe_unsigned_div(entries[0][1] + entries[1][0], sq)
+      qw = safe_ops.safe_unsigned_div(matrix[0, 2] - matrix[2, 0], sq)
+      qx = safe_ops.safe_unsigned_div(matrix[0, 1] + matrix[1, 0], sq)
       qy = 0.25 * sq
-      qz = safe_ops.safe_unsigned_div(entries[1][2] + entries[2][1], sq)
-      return tf.stack((qx, qy, qz, qw), axis=-1)
+      qz = safe_ops.safe_unsigned_div(matrix[1, 2] + matrix[2, 1], sq)
+      return tf.convert_to_tensor([qx, qy, qz, qw], dtype=tf.float32)
 
-    def cond_3():
-      sq = tf.sqrt(1.0 + entries[2][2] - entries[0][0] - entries[1][1] +
+    def cond_3(matrix):
+      sq = tf.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1] +
                    eps_addition) * 2.  # sq = 4 * qz.
-      qw = safe_ops.safe_unsigned_div(entries[1][0] - entries[0][1], sq)
-      qx = safe_ops.safe_unsigned_div(entries[0][2] + entries[2][0], sq)
-      qy = safe_ops.safe_unsigned_div(entries[1][2] + entries[2][1], sq)
+      qw = safe_ops.safe_unsigned_div(matrix[1, 0] - matrix[0, 1], sq)
+      qx = safe_ops.safe_unsigned_div(matrix[0, 2] + matrix[2, 0], sq)
+      qy = safe_ops.safe_unsigned_div(matrix[1, 2] + matrix[2, 1], sq)
       qz = 0.25 * sq
-      return tf.stack((qx, qy, qz, qw), axis=-1)
+      return tf.convert_to_tensor([qx, qy, qz, qw], dtype=tf.float32)
 
-    where_2 = tf.cond(entries[1][1] > entries[2][2], cond_2, cond_3)
-    where_1 = tf.cond(
-        (entries[0][0] > entries[1][1]) & (entries[0][0] > entries[2][2]),
-        cond_1, lambda: where_2)
-    quat = tf.cond(trace > 0, tr_positive, lambda: where_1)
-    return quat
+    def quat_from_matrix(matrix):
+      trace = tf.linalg.trace(matrix)
+      where_2 = tf.cond(matrix[1, 1] > matrix[2, 2], lambda: cond_2(matrix),
+                        lambda: cond_3(matrix))
+      where_1 = tf.cond(
+          (matrix[0, 0] > matrix[1, 1]) & (matrix[0, 0] > matrix[2, 2]),
+          lambda: cond_1(matrix), lambda: where_2)
+      return tf.cond(trace > 0, lambda: tr_positive(matrix, trace),
+                     lambda: where_1)
+
+    return tf.map_fn(quat_from_matrix, rotation_matrix)
 
 
 def inverse(quaternion, name=None):
@@ -495,8 +490,8 @@ def normalized_random_uniform(quaternion_shape, name=None):
   """
   with tf.compat.v1.name_scope(name, "quaternion_normalized_random_uniform",
                                [quaternion_shape]):
-    quaternion_shape = tf.convert_to_tensor(value=quaternion_shape,
-                                            dtype=tf.int32)
+    quaternion_shape = tf.convert_to_tensor(
+        value=quaternion_shape, dtype=tf.int32)
     quaternion_shape = tf.concat((quaternion_shape, tf.constant([4])), axis=0)
     random_normal = tf.random.normal(quaternion_shape)
   return normalize(random_normal)
